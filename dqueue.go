@@ -78,6 +78,11 @@ func newDQueue(c int) *DQueue {
 	}
 }
 
+// Len return the number of elements in the queue.
+func (dq *DQueue) Len() int {
+	return dq.pq.Len()
+}
+
 // Close for close the delay queue.
 // The func can't be called repeatedly.
 func (dq *DQueue) Close() {
