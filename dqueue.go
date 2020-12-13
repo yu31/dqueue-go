@@ -35,7 +35,7 @@ type Message struct {
 	Value Value
 }
 
-// DQueue implements a delay queue base on priority queue (min heap).
+// DQueue implements a delay queue with concurrent safe base on priority queue (min heap).
 // Inspired by https://github.com/RussellLuo/timingwheel/blob/master/delayqueue/delayqueue.go
 type DQueue struct {
 	notifyC chan *Message // Notify channel.
@@ -80,7 +80,10 @@ func newDQueue(c int) *DQueue {
 
 // Len return the number of elements in the queue.
 func (dq *DQueue) Len() int {
-	return dq.pq.Len()
+	dq.mu.Lock()
+	n := dq.pq.Len()
+	dq.mu.Unlock()
+	return n
 }
 
 // Close for close the delay queue.

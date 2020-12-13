@@ -2,6 +2,7 @@ package dqueue
 
 import (
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -51,7 +52,7 @@ func TestDQueue_offer(t *testing.T) {
 
 	now := time.Now().Add(time.Second * 10).UnixNano()
 	dq.offer(now, "1024")
-	require.Equal(t, dq.pq.Len(), 1)
+	require.Equal(t, dq.Len(), 1)
 
 	require.Equal(t, dq.pq.Peek().Key().(Int64), Int64(now))
 	require.Equal(t, dq.pq.Peek().Value().(string), "1024")
@@ -61,32 +62,93 @@ func TestDQueue_offer(t *testing.T) {
 	require.Equal(t, item.Key().(Int64), Int64(now))
 	require.Equal(t, item.Value().(string), "1024")
 	dq.mu.Unlock()
+	require.Equal(t, dq.Len(), 0)
 }
 
 func TestDQueue_peekAndShift(t *testing.T) {
 	dq := newDQueue(16)
 
-	exp := time.Now().Add(time.Second * 10).UnixNano()
-	dq.offer(exp, "1024")
+	// Add first item.
+	exp1 := time.Now().Add(time.Millisecond * 50).UnixNano()
+	dq.offer(exp1, "item1")
+	require.Equal(t, dq.Len(), 1)
 
+	// The first item not expires, get a delay time.
 	dq.mu.Lock()
 	msg, delay := dq.peekAndShift()
 	require.Greater(t, delay, int64(0))
 	require.Nil(t, msg)
 	dq.mu.Unlock()
+	require.Equal(t, dq.Len(), 1)
 
-	exp = time.Now().Add(time.Millisecond).UnixNano()
-	dq.offer(exp, "1024")
+	// Add the second item.
+	exp2 := time.Now().Add(time.Millisecond).UnixNano()
+	dq.offer(exp2, "item2")
+	require.Equal(t, dq.Len(), 2)
 
+	// Waits for the second item expiration.
 	time.Sleep(time.Millisecond * 2)
 
+	// The second item is expires, get the item.
 	dq.mu.Lock()
 	msg, delay = dq.peekAndShift()
 	require.Equal(t, delay, int64(0))
 	require.NotNil(t, msg)
-	require.Equal(t, msg.Expiration, exp)
-	require.Equal(t, msg.Value.(string), "1024")
+	require.Equal(t, msg.Expiration, exp2)
+	require.Equal(t, msg.Value.(string), "item2")
 	dq.mu.Unlock()
+	require.Equal(t, dq.Len(), 1)
+
+	// Waits for the first item expiration.
+	time.Sleep(time.Millisecond * 50)
+
+	// The first item is expires.
+	dq.mu.Lock()
+	msg, delay = dq.peekAndShift()
+	require.Equal(t, delay, int64(0))
+	require.NotNil(t, msg)
+	require.Equal(t, msg.Expiration, exp1)
+	require.Equal(t, msg.Value.(string), "item1")
+	dq.mu.Unlock()
+	require.Equal(t, dq.Len(), 0)
+}
+
+func TestDQueue_Len(t *testing.T) {
+	dq := Default()
+	defer dq.Close()
+
+	require.Equal(t, dq.Len(), 0)
+
+	seeds := []time.Duration{
+		time.Millisecond * 1,
+		time.Millisecond * 2,
+		time.Millisecond * 3,
+		time.Millisecond * 4,
+		time.Millisecond * 5,
+		time.Millisecond * 6,
+		time.Millisecond * 7,
+		time.Millisecond * 8,
+	}
+
+	wg := new(sync.WaitGroup)
+	wg.Add(len(seeds))
+
+	for i := 0; i < len(seeds); i++ {
+		dq.After(seeds[i], "1024")
+		require.Equal(t, dq.Len(), i+1)
+	}
+
+	i := len(seeds) - 1
+	go func() {
+		dq.Receive(func(msg *Message) {
+			require.Equal(t, dq.Len(), i)
+			i--
+			wg.Done()
+		})
+	}()
+
+	wg.Wait()
+	require.Equal(t, dq.Len(), 0)
 }
 
 type Result struct {
