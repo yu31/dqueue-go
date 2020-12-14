@@ -12,8 +12,9 @@ import (
 
 func TestNew(t *testing.T) {
 	capacity := 8
-	dq := newDQueue(capacity)
+	dq := New(capacity)
 	require.NotNil(t, dq)
+
 	defer dq.Close()
 
 	require.NotNil(t, dq.notifyC)
@@ -24,13 +25,11 @@ func TestNew(t *testing.T) {
 	require.NotNil(t, dq.wakeupC)
 	require.NotNil(t, dq.exitC)
 	require.NotNil(t, dq.wg)
-	require.Equal(t, atomic.LoadInt32(&dq.ready), int32(0))
 
 	go dq.polling()
 	time.Sleep(time.Millisecond * 3)
 
 	require.Equal(t, atomic.LoadInt32(&dq.sleeping), int32(1))
-	require.Equal(t, atomic.LoadInt32(&dq.ready), int32(1))
 }
 
 func TestDefault(t *testing.T) {
@@ -48,7 +47,7 @@ func TestDQueue_Close(t *testing.T) {
 }
 
 func TestDQueue_offer(t *testing.T) {
-	dq := newDQueue(16)
+	dq := Default()
 
 	now := time.Now().Add(time.Second * 10).UnixNano()
 	dq.offer(now, "1024")
@@ -66,7 +65,7 @@ func TestDQueue_offer(t *testing.T) {
 }
 
 func TestDQueue_peekAndShift(t *testing.T) {
-	dq := newDQueue(16)
+	dq := Default()
 
 	// Add first item.
 	exp1 := time.Now().Add(time.Millisecond * 50).UnixNano()
@@ -115,7 +114,6 @@ func TestDQueue_peekAndShift(t *testing.T) {
 
 func TestDQueue_Len(t *testing.T) {
 	dq := Default()
-	defer dq.Close()
 
 	require.Equal(t, dq.Len(), 0)
 
@@ -139,16 +137,22 @@ func TestDQueue_Len(t *testing.T) {
 	}
 
 	i := len(seeds) - 1
+	dq.Consume(func(msg *Message) {
+		require.Equal(t, dq.Len(), i)
+		i--
+		wg.Done()
+	})
+
 	go func() {
-		dq.Receive(func(msg *Message) {
-			require.Equal(t, dq.Len(), i)
-			i--
-			wg.Done()
-		})
+		// Waits for all task finished.
+		wg.Wait()
+		require.Equal(t, dq.Len(), 0)
+		// Close the queue.
+		dq.Close()
 	}()
 
-	wg.Wait()
-	require.Equal(t, dq.Len(), 0)
+	// Wait for queue closed.
+	dq.Wait()
 }
 
 type Result struct {
@@ -162,11 +166,9 @@ func receiveAndCheck(t *testing.T, offer string) {
 
 	checkC := make(chan *Result)
 
-	go func() {
-		dq.Receive(func(msg *Message) {
-			checkC <- &Result{T: time.Now(), M: msg}
-		})
-	}()
+	dq.Consume(func(msg *Message) {
+		checkC <- &Result{T: time.Now(), M: msg}
+	})
 
 	seeds := []time.Duration{
 		time.Millisecond * 1,
