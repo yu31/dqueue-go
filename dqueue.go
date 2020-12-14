@@ -76,7 +76,8 @@ func (dq *DQueue) Len() int {
 	return n
 }
 
-// Consume register a func to consume expiration data.
+// Consume register a func in goroutine to async consume the expiration data.
+// You can call the Wait method to blocks the main process after.
 func (dq *DQueue) Consume(f Consumer) {
 	dq.wg.Add(2)
 
