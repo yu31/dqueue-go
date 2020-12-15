@@ -47,6 +47,8 @@ type DQueue struct {
 
 	exitC chan struct{}   // The exitC is used to notify the polling and receive stop.
 	wg    *sync.WaitGroup // The wg is used to waits the polling and receive finish.
+
+	state int8 // The queue states, 0 for initialing, 1 for consuming and 2 for closed.
 }
 
 // Default creates an DQueue with default parameters.
@@ -65,6 +67,7 @@ func New(c int) *DQueue {
 		wakeupC:  make(chan struct{}),
 		exitC:    make(chan struct{}),
 		wg:       new(sync.WaitGroup),
+		state:    0,
 	}
 }
 
@@ -76,31 +79,55 @@ func (dq *DQueue) Len() int {
 	return n
 }
 
-// Consume register a func in goroutine to async consume the expiration data.
-// You can call the Wait method to blocks the main process after.
+// Consume register a func in its own goroutine to consume the expiration data.
+// Only one consumer is allowed.
+//
+// You can calls the Wait method to blocks the main process after.
 func (dq *DQueue) Consume(f Consumer) {
-	dq.wg.Add(2)
+	dq.mu.Lock()
+	defer dq.mu.Unlock()
+	// Already in consuming.
+	if dq.state == 1 {
+		panic("dqueue: already in consuming")
+	}
+	// The queue has been closed.
+	if dq.state == 2 {
+		panic("dqueue: consume of closed queue")
+	}
+	// Set the states to consuming.
+	dq.state = 1
 
+	// Async do polling and consume.
+	dq.wg.Add(2)
 	go func() {
 		dq.polling()
 		dq.wg.Done()
 	}()
-
 	go func() {
 		dq.consume(f)
 		dq.wg.Done()
 	}()
 }
 
-// Wait can used for blocking until queue closed.
+// Wait for blocking until queue closed.
+// You should calls it after Consume.
 func (dq *DQueue) Wait() {
 	dq.wg.Wait()
 }
 
-// Close for close the queue after calls Consume.
+// Close for close the queue.
 func (dq *DQueue) Close() {
+	dq.mu.Lock()
+	defer dq.mu.Unlock()
+	// The queue has been closed.
+	if dq.state == 2 {
+		panic("dquque: close of closed queue")
+	}
+	// Set the states to closed.
+	dq.state = 2
+
+	// Close the exit channel to notifies and waits the running goroutine exit.
 	close(dq.exitC)
-	// Waiting for the running goroutine to exit.
 	dq.wg.Wait()
 }
 

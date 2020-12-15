@@ -25,11 +25,7 @@ func TestNew(t *testing.T) {
 	require.NotNil(t, dq.wakeupC)
 	require.NotNil(t, dq.exitC)
 	require.NotNil(t, dq.wg)
-
-	go dq.polling()
-	time.Sleep(time.Millisecond * 3)
-
-	require.Equal(t, atomic.LoadInt32(&dq.sleeping), int32(1))
+	require.Equal(t, dq.state, int8(0))
 }
 
 func TestDefault(t *testing.T) {
@@ -43,6 +39,31 @@ func TestDQueue_Close(t *testing.T) {
 	dq.Close()
 	require.Panics(t, func() {
 		dq.Close()
+	})
+}
+
+func TestDQueue_Consume(t *testing.T) {
+	dq := Default()
+	require.Equal(t, dq.state, int8(0))
+	require.Equal(t, atomic.LoadInt32(&dq.sleeping), int32(0))
+
+	// register
+	dq.Consume(func(msg *Message) {})
+
+	time.Sleep(time.Millisecond * 3)
+
+	require.Equal(t, dq.state, int8(1))
+	require.Equal(t, atomic.LoadInt32(&dq.sleeping), int32(1))
+
+	// duplicate consume.
+	require.Panics(t, func() {
+		dq.Consume(func(msg *Message) {})
+	})
+
+	// consume a closed queue.
+	dq.Close()
+	require.Panics(t, func() {
+		dq.Consume(func(msg *Message) {})
 	})
 }
 
