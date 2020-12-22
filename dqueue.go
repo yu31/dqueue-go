@@ -209,7 +209,6 @@ LOOP:
 				break LOOP
 			case <-dq.wakeupC:
 			}
-
 			continue LOOP
 		}
 
@@ -230,7 +229,6 @@ LOOP:
 					<-dq.wakeupC
 				}
 			}
-
 			continue LOOP
 		}
 
@@ -245,8 +243,11 @@ LOOP:
 
 	// Reset the sleeping states before exits.
 	if atomic.SwapInt32(&dq.sleeping, 0) == 0 {
-		// A caller of offer() is being blocked on sending to wakeupC,
+		// A caller of offer() is may being blocked on sending to wakeupC,
 		// drain wakeupC to unblock the caller.
-		<-dq.wakeupC
+		select {
+		case <-dq.wakeupC:
+		default:
+		}
 	}
 }
