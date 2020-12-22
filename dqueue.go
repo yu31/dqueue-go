@@ -35,7 +35,7 @@ type Message struct {
 	Value Value
 }
 
-// DQueue implements a delay queue with concurrent safe base on priority queue (min heap).
+// DQueue implements a delay queue with concurrency safe base on priority queue (min heap).
 type DQueue struct {
 	notifyC chan *Message // Notify channel.
 
