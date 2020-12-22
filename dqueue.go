@@ -39,8 +39,8 @@ type Message struct {
 type DQueue struct {
 	notifyC chan *Message // Notify channel.
 
-	mu *sync.Mutex
 	pq *minheap.MinHeap // A priority queue implemented with min heap.
+	mu *sync.Mutex      // Mutex lock for any operations with pq.
 
 	sleeping int32         // Similar to the sleeping state of runtime.timers. 1 => true, 0 => false.
 	wakeupC  chan struct{} // The wakeupC for wakeup the polling goroutine if new item add to queue head.
@@ -88,7 +88,7 @@ func (dq *DQueue) Consume(f Consumer) {
 	defer dq.mu.Unlock()
 	// Already in consuming.
 	if dq.state == 1 {
-		panic("dqueue: already in consuming")
+		panic("dqueue: consume of consuming queue")
 	}
 	// The queue has been closed.
 	if dq.state == 2 {
@@ -97,14 +97,16 @@ func (dq *DQueue) Consume(f Consumer) {
 	// Set the states to consuming.
 	dq.state = 1
 
-	// Async do polling and consume.
-	dq.wg.Add(2)
+	// Async polling in goroutine.
+	dq.wg.Add(1)
 	go func() {
 		dq.polling()
 		dq.wg.Done()
 	}()
+	// Async consuming in goroutine.
+	dq.wg.Add(1)
 	go func() {
-		dq.consume(f)
+		dq.consuming(f)
 		dq.wg.Done()
 	}()
 }
@@ -118,16 +120,16 @@ func (dq *DQueue) Wait() {
 // Close for close the queue.
 func (dq *DQueue) Close() {
 	dq.mu.Lock()
-	defer dq.mu.Unlock()
 	// The queue has been closed.
 	if dq.state == 2 {
 		panic("dquque: close of closed queue")
 	}
 	// Set the states to closed.
 	dq.state = 2
-
-	// Close the exit channel to notifies and waits the running goroutine exit.
+	// Close the exit channel to notifies.
 	close(dq.exitC)
+	dq.mu.Unlock()
+	// waits the running goroutine exit.
 	dq.wg.Wait()
 }
 
@@ -155,7 +157,7 @@ func (dq *DQueue) offer(expiration int64, value Value) {
 	}
 }
 
-func (dq *DQueue) consume(f Consumer) {
+func (dq *DQueue) consuming(f Consumer) {
 	for {
 		select {
 		case <-dq.exitC:
@@ -248,5 +250,9 @@ LOOP:
 	}
 
 	// Reset the sleeping states before exits.
-	atomic.StoreInt32(&dq.sleeping, 0)
+	if atomic.SwapInt32(&dq.sleeping, 0) == 0 {
+		// A caller of offer() is being blocked on sending to wakeupC,
+		// drain wakeupC to unblock the caller.
+		<-dq.wakeupC
+	}
 }
