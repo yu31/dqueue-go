@@ -164,16 +164,12 @@ func TestDQueue_Len(t *testing.T) {
 		wg.Done()
 	})
 
-	go func() {
-		// Waits for all task finished.
-		wg.Wait()
-		require.Equal(t, dq.Len(), 0)
-		// Close the queue.
-		dq.Close()
-	}()
+	// Waits for all task finished.
+	wg.Wait()
 
-	// Wait for queue closed.
-	dq.Wait()
+	require.Equal(t, dq.Len(), 0)
+	// Close the queue.
+	dq.Close()
 }
 
 type Result struct {

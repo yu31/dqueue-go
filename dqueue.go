@@ -111,12 +111,6 @@ func (dq *DQueue) Consume(f Consumer) {
 	}()
 }
 
-// Wait for blocking until queue closed.
-// You should calls it after Consume.
-func (dq *DQueue) Wait() {
-	dq.wg.Wait()
-}
-
 // Close for close the queue.
 func (dq *DQueue) Close() {
 	dq.mu.Lock()
