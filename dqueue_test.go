@@ -15,7 +15,7 @@ func TestNew(t *testing.T) {
 	dq := New(capacity)
 	require.NotNil(t, dq)
 
-	defer dq.Close()
+	defer dq.Stop()
 
 	require.NotNil(t, dq.notifyC)
 	require.NotNil(t, dq.mu)
@@ -36,19 +36,20 @@ func TestDefault(t *testing.T) {
 
 func TestDQueue_Close(t *testing.T) {
 	dq := Default()
-	dq.Close()
-	require.Panics(t, func() {
-		dq.Close()
-	})
+	dq.Stop()
+	dq.Stop()
+	//require.Panics(t, func() {
+	//	dq.Stop()
+	//})
 }
 
-func TestDQueue_Consume(t *testing.T) {
+func TestDQueue_Start(t *testing.T) {
 	dq := Default()
 	require.Equal(t, dq.state, int8(0))
 	require.Equal(t, atomic.LoadInt32(&dq.sleeping), int32(0))
 
 	// register
-	dq.Consume(func(msg *Message) {})
+	dq.Start(func(msg *Message) {})
 
 	time.Sleep(time.Millisecond * 3)
 
@@ -57,13 +58,13 @@ func TestDQueue_Consume(t *testing.T) {
 
 	// duplicate consume.
 	require.Panics(t, func() {
-		dq.Consume(func(msg *Message) {})
+		dq.Start(func(msg *Message) {})
 	})
 
 	// consume a closed queue.
-	dq.Close()
+	dq.Stop()
 	require.Panics(t, func() {
-		dq.Consume(func(msg *Message) {})
+		dq.Start(func(msg *Message) {})
 	})
 }
 
@@ -158,7 +159,7 @@ func TestDQueue_Len(t *testing.T) {
 	}
 
 	i := len(seeds) - 1
-	dq.Consume(func(msg *Message) {
+	dq.Start(func(msg *Message) {
 		require.Equal(t, dq.Len(), i)
 		i--
 		wg.Done()
@@ -168,8 +169,8 @@ func TestDQueue_Len(t *testing.T) {
 	wg.Wait()
 
 	require.Equal(t, dq.Len(), 0)
-	// Close the queue.
-	dq.Close()
+	// Stop the queue.
+	dq.Stop()
 }
 
 type Result struct {
@@ -179,11 +180,11 @@ type Result struct {
 
 func receiveAndCheck(t *testing.T, offer string) {
 	dq := Default()
-	defer dq.Close()
+	defer dq.Stop()
 
 	checkC := make(chan *Result)
 
-	dq.Consume(func(msg *Message) {
+	dq.Start(func(msg *Message) {
 		checkC <- &Result{T: time.Now(), M: msg}
 	})
 

@@ -19,8 +19,10 @@ const (
 )
 
 // Type aliases for simplifying use in this package.
-type Int64 = container.Int64
-type Value = container.Value
+type (
+	Int64 = container.Int64
+ 	Value = container.Value
+)
 
 // Consumer is a function for consume the expires data.
 type Consumer func(msg *Message)
@@ -48,7 +50,7 @@ type DQueue struct {
 	exitC chan struct{}   // The exitC is used to notify the polling and receive stop.
 	wg    *sync.WaitGroup // The wg is used to waits the polling and receive finish.
 
-	state int8 // The queue states, 0 for initialing, 1 for consuming and 2 for closed.
+	state int8 // The queue states, 0 for initialing, 1 for started and 2 for stopped.
 }
 
 // Default creates an DQueue with default parameters.
@@ -79,22 +81,22 @@ func (dq *DQueue) Len() int {
 	return n
 }
 
-// Consume register a func in its own goroutine to consume the expiration data.
+// Start register a func in its own goroutine to consume the expiration data.
 // Only one consumer is allowed.
 //
 // You can calls the Wait method to blocks the main process after.
-func (dq *DQueue) Consume(f Consumer) {
+func (dq *DQueue) Start(f Consumer) {
 	dq.mu.Lock()
 	defer dq.mu.Unlock()
-	// Already in consuming.
+	// Has been started.
 	if dq.state == 1 {
 		panic("dqueue: consume of consuming queue")
 	}
-	// The queue has been closed.
+	// The queue has been stopped.
 	if dq.state == 2 {
 		panic("dqueue: consume of closed queue")
 	}
-	// Set the states to consuming.
+	// Set the states to started.
 	dq.state = 1
 
 	// Async polling in goroutine.
@@ -111,18 +113,23 @@ func (dq *DQueue) Consume(f Consumer) {
 	}()
 }
 
-// Close for close the queue.
-func (dq *DQueue) Close() {
+// Stop for stop the delay queue.
+func (dq *DQueue) Stop() {
 	dq.mu.Lock()
-	// The queue has been closed.
+
+	// The queue has been stopped.
 	if dq.state == 2 {
-		panic("dquque: close of closed queue")
+		dq.mu.Unlock()
+		return
 	}
+
 	// Set the states to closed.
 	dq.state = 2
-	// Close the exit channel to notifies.
+	// Stop the exit channel to notifies.
 	close(dq.exitC)
+
 	dq.mu.Unlock()
+
 	// waits the running goroutine exit.
 	dq.wg.Wait()
 }
