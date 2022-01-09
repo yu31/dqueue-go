@@ -21,25 +21,22 @@ const (
 // Type aliases for simplifying use in this package.
 type (
 	Int64 = container.Int64
- 	Value = container.Value
+	Value = container.Value
 )
 
-// Consumer is a function for consume the expires data.
-type Consumer func(msg *Message)
+// Delayer to calculate the delay time by expiration.
+type Delayer func(expiration int64) (delay time.Duration)
 
-// Message is a message that sends expiration data to the Receiver.
-type Message struct {
-	// Actual is the timestamp that when generates the message.
-	Actual int64
-	// Expiration is the expiration timestamp of the Value.
-	Expiration int64
-	// Value is the value that added by After or Expire.
-	Value Value
+func defaultDelayer(expiration int64) (delay time.Duration) {
+	return time.Duration(expiration - time.Now().UnixNano())
 }
+
+// Consumer is a function for consume the expires data.
+type Consumer func(msg Value)
 
 // DQueue implements a delay queue with concurrency safe base on priority queue (min heap).
 type DQueue struct {
-	notifyC chan *Message // Notify channel.
+	notifyC chan Value // Notify channel.
 
 	pq *minheap.MinHeap // A priority queue implemented with min heap.
 	mu *sync.Mutex      // Mutex lock for any operations with pq.
@@ -51,6 +48,8 @@ type DQueue struct {
 	wg    *sync.WaitGroup // The wg is used to waits the polling and receive finish.
 
 	state int8 // The queue states, 0 for initialing, 1 for started and 2 for stopped.
+
+	delayer Delayer
 }
 
 // Default creates an DQueue with default parameters.
@@ -62,7 +61,7 @@ func Default() *DQueue {
 // And execute polling in a goroutine.
 func New(c int) *DQueue {
 	return &DQueue{
-		notifyC:  make(chan *Message),
+		notifyC:  make(chan Value),
 		pq:       minheap.New(c),
 		mu:       new(sync.Mutex),
 		sleeping: 0,
@@ -70,7 +69,14 @@ func New(c int) *DQueue {
 		exitC:    make(chan struct{}),
 		wg:       new(sync.WaitGroup),
 		state:    0,
+		delayer:  defaultDelayer,
 	}
+}
+
+// WithDelayer for reset the delayer func
+func (dq *DQueue) WithDelayer(delayer Delayer) *DQueue {
+	dq.delayer = delayer
+	return dq
 }
 
 // Len returns the number of not expired data in the queue.
@@ -134,19 +140,9 @@ func (dq *DQueue) Stop() {
 	dq.wg.Wait()
 }
 
-// After adds the value of the specified delay time to the queue.
-// e.g. dq.After(time.Millisecond, "1024")
-func (dq *DQueue) After(delay time.Duration, value Value) {
-	dq.offer(time.Now().Add(delay).UnixNano(), value)
-}
-
-// Expire adds the value of the specified expiration timestamp to the queue.
-// e.g. dq.Expire(time.Now().Add(time.Second).UnixNano(), "1024")
-func (dq *DQueue) Expire(expiration int64, value Value) {
-	dq.offer(expiration, value)
-}
-
-func (dq *DQueue) offer(expiration int64, value Value) {
+// Offer adds the value of the specified expiration(default is nano seconds timestamp) to the queue.
+// e.g. dq.Offer(time.Now().Add(time.Second).UnixNano(), "1024")
+func (dq *DQueue) Offer(expiration int64, value Value) {
 	dq.mu.Lock()
 	item := dq.pq.Push(Int64(expiration), value)
 	index := item.Index()
@@ -163,13 +159,13 @@ func (dq *DQueue) consuming(f Consumer) {
 		select {
 		case <-dq.exitC:
 			return
-		case msg := <-dq.notifyC:
-			f(msg)
+		case val := <-dq.notifyC:
+			f(val)
 		}
 	}
 }
 
-func (dq *DQueue) peekAndShift() (*Message, int64) {
+func (dq *DQueue) peekAndShift() (Value, time.Duration) {
 	item := dq.pq.Peek()
 	if item == nil {
 		// The queue is empty.
@@ -177,29 +173,22 @@ func (dq *DQueue) peekAndShift() (*Message, int64) {
 	}
 
 	expiration := int64(item.Key().(Int64))
-	now := time.Now().UnixNano()
-	delay := expiration - now
+
+	delay := dq.delayer(expiration)
 	if delay > 0 {
 		return nil, delay
 	}
-
 	// Removes item from queue top.
 	_ = dq.pq.Pop()
-
-	msg := &Message{
-		Actual:     now,
-		Expiration: expiration,
-		Value:      item.Value(),
-	}
-	return msg, 0
+	return item.Value(), 0
 }
 
 func (dq *DQueue) polling() {
 LOOP:
 	for {
 		dq.mu.Lock()
-		msg, delay := dq.peekAndShift()
-		if msg == nil {
+		val, delay := dq.peekAndShift()
+		if val == nil {
 			// No items left or at least one item is pending.
 
 			// We must ensure the atomicity of the whole operation, which is
@@ -210,7 +199,7 @@ LOOP:
 		dq.mu.Unlock()
 
 		// No items in queue. Waiting to be wakeup.
-		if msg == nil && delay == 0 {
+		if val == nil && delay == 0 {
 			select {
 			case <-dq.exitC:
 				break LOOP
@@ -226,7 +215,7 @@ LOOP:
 				break LOOP
 			case <-dq.wakeupC:
 				// A new item with an "earlier" expiration than the current "earliest" one is added.
-			case <-time.After(time.Duration(delay)):
+			case <-time.After(delay):
 				// The current "earliest" item expires.
 
 				// Reset the sleeping state since there's no need to receive from wakeupC.
@@ -243,7 +232,7 @@ LOOP:
 		select {
 		case <-dq.exitC:
 			break LOOP
-		case dq.notifyC <- msg:
+		case dq.notifyC <- val:
 			// The expired data has been sent out successfully.
 		}
 	}

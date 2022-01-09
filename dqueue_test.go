@@ -26,6 +26,7 @@ func TestNew(t *testing.T) {
 	require.NotNil(t, dq.exitC)
 	require.NotNil(t, dq.wg)
 	require.Equal(t, dq.state, int8(0))
+	require.NotNil(t, dq.delayer)
 }
 
 func TestDefault(t *testing.T) {
@@ -49,7 +50,7 @@ func TestDQueue_Start(t *testing.T) {
 	require.Equal(t, atomic.LoadInt32(&dq.sleeping), int32(0))
 
 	// register
-	dq.Start(func(msg *Message) {})
+	dq.Start(func(val Value) {})
 
 	time.Sleep(time.Millisecond * 3)
 
@@ -58,13 +59,13 @@ func TestDQueue_Start(t *testing.T) {
 
 	// duplicate consume.
 	require.Panics(t, func() {
-		dq.Start(func(msg *Message) {})
+		dq.Start(func(val Value) {})
 	})
 
 	// consume a closed queue.
 	dq.Stop()
 	require.Panics(t, func() {
-		dq.Start(func(msg *Message) {})
+		dq.Start(func(val Value) {})
 	})
 }
 
@@ -72,7 +73,7 @@ func TestDQueue_offer(t *testing.T) {
 	dq := Default()
 
 	now := time.Now().Add(time.Second * 10).UnixNano()
-	dq.offer(now, "1024")
+	dq.Offer(now, "1024")
 	require.Equal(t, dq.Len(), 1)
 
 	require.Equal(t, dq.pq.Peek().Key().(Int64), Int64(now))
@@ -91,20 +92,20 @@ func TestDQueue_peekAndShift(t *testing.T) {
 
 	// Add first item.
 	exp1 := time.Now().Add(time.Millisecond * 50).UnixNano()
-	dq.offer(exp1, "item1")
+	dq.Offer(exp1, "item1")
 	require.Equal(t, dq.Len(), 1)
 
 	// The first item not expires, get a delay time.
 	dq.mu.Lock()
-	msg, delay := dq.peekAndShift()
-	require.Greater(t, delay, int64(0))
-	require.Nil(t, msg)
+	val, delay := dq.peekAndShift()
+	require.Greater(t, int64(delay), int64(0))
+	require.Nil(t, val)
 	dq.mu.Unlock()
 	require.Equal(t, dq.Len(), 1)
 
 	// Add the second item.
 	exp2 := time.Now().Add(time.Millisecond).UnixNano()
-	dq.offer(exp2, "item2")
+	dq.Offer(exp2, "item2")
 	require.Equal(t, dq.Len(), 2)
 
 	// Waits for the second item expiration.
@@ -112,11 +113,11 @@ func TestDQueue_peekAndShift(t *testing.T) {
 
 	// The second item is expires, get the item.
 	dq.mu.Lock()
-	msg, delay = dq.peekAndShift()
-	require.Equal(t, delay, int64(0))
-	require.NotNil(t, msg)
-	require.Equal(t, msg.Expiration, exp2)
-	require.Equal(t, msg.Value.(string), "item2")
+	val, delay = dq.peekAndShift()
+	require.Equal(t, int64(delay), int64(0))
+	require.NotNil(t, val)
+	//require.Equal(t, msg.Expiration, exp2)
+	require.Equal(t, val.(string), "item2")
 	dq.mu.Unlock()
 	require.Equal(t, dq.Len(), 1)
 
@@ -125,11 +126,11 @@ func TestDQueue_peekAndShift(t *testing.T) {
 
 	// The first item is expires.
 	dq.mu.Lock()
-	msg, delay = dq.peekAndShift()
-	require.Equal(t, delay, int64(0))
-	require.NotNil(t, msg)
-	require.Equal(t, msg.Expiration, exp1)
-	require.Equal(t, msg.Value.(string), "item1")
+	val, delay = dq.peekAndShift()
+	require.Equal(t, int64(delay), int64(0))
+	require.NotNil(t, val)
+	//require.Equal(t, msg.Expiration, exp1)
+	require.Equal(t, val.(string), "item1")
 	dq.mu.Unlock()
 	require.Equal(t, dq.Len(), 0)
 }
@@ -154,12 +155,13 @@ func TestDQueue_Len(t *testing.T) {
 	wg.Add(len(seeds))
 
 	for i := 0; i < len(seeds); i++ {
-		dq.After(seeds[i], "1024")
+		x := time.Now().Add(seeds[i]).UnixNano()
+		dq.Offer(x, "1024")
 		require.Equal(t, dq.Len(), i+1)
 	}
 
 	i := len(seeds) - 1
-	dq.Start(func(msg *Message) {
+	dq.Start(func(val Value) {
 		require.Equal(t, dq.Len(), i)
 		i--
 		wg.Done()
@@ -175,17 +177,17 @@ func TestDQueue_Len(t *testing.T) {
 
 type Result struct {
 	T time.Time // Receive Time
-	M *Message  // Receive Message.
+	V Value     // Receive Message.
 }
 
-func receiveAndCheck(t *testing.T, offer string) {
+func TestDQueue_Offer(t *testing.T) {
 	dq := Default()
 	defer dq.Stop()
 
 	checkC := make(chan *Result)
 
-	dq.Start(func(msg *Message) {
-		checkC <- &Result{T: time.Now(), M: msg}
+	dq.Start(func(val Value) {
+		checkC <- &Result{T: time.Now(), V: val}
 	})
 
 	seeds := []time.Duration{
@@ -204,12 +206,7 @@ func receiveAndCheck(t *testing.T, offer string) {
 
 	for _, d := range seeds {
 		value := d.String()
-		switch offer {
-		case "after":
-			dq.After(d, value)
-		case "expire":
-			dq.Expire(time.Now().Add(d).UnixNano(), value)
-		}
+		dq.Offer(time.Now().Add(d).UnixNano(), value)
 	}
 
 	for _, d := range seeds {
@@ -220,23 +217,10 @@ func receiveAndCheck(t *testing.T, offer string) {
 		got := <-checkC
 
 		// Check expiration and value
-		require.GreaterOrEqual(t, got.M.Expiration, start.Add(d).UnixNano())
-		require.Equal(t, d.String(), got.M.Value)
-
-		// Check actual timestamp
-		require.LessOrEqual(t, got.M.Actual, got.T.UnixNano())
-		require.GreaterOrEqual(t, got.M.Actual, got.M.Expiration)
+		require.Equal(t, d.String(), got.V)
 
 		// Check the receive timestamp.
 		require.Greater(t, got.T.UnixNano(), min.UnixNano(), fmt.Sprintf("%s: got: %s, want: %s", d.String(), got.T.String(), min.String()))
 		require.Less(t, got.T.UnixNano(), max.UnixNano(), fmt.Sprintf("%s: got: %s, want: %s", d.String(), got.T.String(), max.String()))
 	}
-}
-
-func TestDQueue_After(t *testing.T) {
-	receiveAndCheck(t, "after")
-}
-
-func TestDQueue_Expire(t *testing.T) {
-	receiveAndCheck(t, "expire")
 }
