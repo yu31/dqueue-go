@@ -184,6 +184,7 @@ func (dq *DQueue) peekAndShift() (Value, time.Duration) {
 }
 
 func (dq *DQueue) polling() {
+	var timer *time.Timer
 LOOP:
 	for {
 		dq.mu.Lock()
@@ -210,12 +211,17 @@ LOOP:
 
 		// At least one item is pending. Go to sleep.
 		if delay > 0 {
+			if timer == nil {
+				timer = time.NewTimer(delay)
+			} else {
+				timer.Reset(delay)
+			}
 			select {
 			case <-dq.exitC:
 				break LOOP
 			case <-dq.wakeupC:
 				// A new item with an "earlier" expiration than the current "earliest" one is added.
-			case <-time.After(delay):
+			case <-timer.C:
 				// The current "earliest" item expires.
 
 				// Reset the sleeping state since there's no need to receive from wakeupC.
@@ -237,6 +243,9 @@ LOOP:
 		}
 	}
 
+	if timer != nil {
+		timer.Stop()
+	}
 	// Reset the sleeping states before exits.
 	if atomic.SwapInt32(&dq.sleeping, 0) == 0 {
 		// A caller of offer() is may being blocked on sending to wakeupC,
