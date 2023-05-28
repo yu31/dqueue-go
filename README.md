@@ -1,5 +1,5 @@
 # dqueue
-A DelayQueue implementation in GoLang
+An DelayQueue implementation in GoLang
 
 ## References
 

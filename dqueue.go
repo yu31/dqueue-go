@@ -10,8 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/yu31/gostructs/container"
-	"github.com/yu31/gostructs/minheap"
+	"github.com/yu31/structs-go/container"
+	"github.com/yu31/structs-go/minheap"
 )
 
 const (
@@ -102,7 +102,7 @@ func (dq *DQueue) Start(f Consumer) {
 	if dq.state == 2 {
 		panic("dqueue: consume of closed queue")
 	}
-	// Set the states to started.
+	// Set the states to start.
 	dq.state = 1
 
 	// Async polling in goroutine.
@@ -140,7 +140,7 @@ func (dq *DQueue) Stop() {
 	dq.wg.Wait()
 }
 
-// Offer adds the value of the specified expiration(default is nano seconds timestamp) to the queue.
+// Offer adds the value of the specified expiration(default is nanoseconds timestamp) to the queue.
 // e.g. dq.Offer(time.Now().Add(time.Second).UnixNano(), "1024")
 func (dq *DQueue) Offer(expiration int64, value Value) {
 	dq.mu.Lock()

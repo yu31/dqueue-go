@@ -5,8 +5,8 @@ github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZN
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/testify v1.6.1 h1:hDPOHmpOpP40lSULcqw7IrRb/u7w6RpDC9399XyoNd0=
 github.com/stretchr/testify v1.6.1/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
-github.com/yu31/gostructs v0.0.0-20220107115217-dc0130426169 h1:+4aampORMkItxtUYZTWNswHwH88MbyfKlvoCqmIkVI8=
-github.com/yu31/gostructs v0.0.0-20220107115217-dc0130426169/go.mod h1:2nxYgIcGxEN5nRc3n3pRusl7ys+oEM14uInKe+WtouQ=
+github.com/yu31/structs-go v0.0.0-20230528144825-8e5b93bbfcb1 h1:VuJyx6JLHlQ2nyjAr9WQQI87HoCxxK5hFh7kyhUs9Q8=
+github.com/yu31/structs-go v0.0.0-20230528144825-8e5b93bbfcb1/go.mod h1:3OPuZPXkvdAzlDShxyfd/ZqyW/+9cVQ49P4KPsvKi3A=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405 h1:yhCVgyC4o1eVCa2tZl7eS0r+SDo693bJlVdllGtEeKM=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
 gopkg.in/yaml.v3 v3.0.0-20200313102051-9f266ea9e77c h1:dUUwHk2QECo/6vqA44rthZ8ie2QXMNeKRTHCNY2nXvo=
